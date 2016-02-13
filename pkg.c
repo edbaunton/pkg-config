@@ -1,6 +1,6 @@
-/* 
+/*
  * Copyright (C) 2001, 2002 Red Hat Inc.
- * 
+ *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
  * published by the Free Software Foundation; either version 2 of the
@@ -10,7 +10,7 @@
  * WITHOUT ANY WARRANTY; without even the implied warranty of
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
- * 
+ *
  * You should have received a copy of the GNU General Public License
  * along with this program; if not, write to the Free Software
  * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA
@@ -53,6 +53,7 @@ gboolean disable_uninstalled = FALSE;
 gboolean ignore_requires = FALSE;
 gboolean ignore_requires_private = TRUE;
 gboolean ignore_private_libs = TRUE;
+gboolean ignore_conflicts = FALSE;
 
 void
 add_search_dir (const char *path)
@@ -67,17 +68,17 @@ add_search_dirs (const char *path, const char *separator)
       char **iter;
 
       search_dirs = g_strsplit (path, separator, -1);
-    
+
       iter = search_dirs;
       while (*iter)
         {
           debug_spew ("Adding directory '%s' from PKG_CONFIG_PATH\n",
                       *iter);
           add_search_dir (*iter);
-          
+
           ++iter;
         }
-      
+
       g_strfreev (search_dirs);
 }
 
@@ -96,7 +97,7 @@ static gboolean
 ends_in_dotpc (const char *str)
 {
   int len = strlen (str);
-  
+
   if (len > EXT_LEN &&
       str[len - 3] == '.' &&
       FOLD (str[len - 2]) == 'p' &&
@@ -113,7 +114,7 @@ gboolean
 name_ends_in_uninstalled (const char *str)
 {
   int len = strlen (str);
-  
+
   if (len > UNINSTALLED_LEN &&
       FOLDCMP ((str + len - UNINSTALLED_LEN), "-uninstalled") == 0)
     return TRUE;
@@ -171,7 +172,7 @@ scan_dir (char *dirname)
     }
 
   debug_spew ("Scanning directory #%i '%s'\n", scanned_dir_count, dirname);
-  
+
   while ((d_name = g_dir_read_name(dir)))
     {
       int len = strlen (d_name);
@@ -181,7 +182,7 @@ scan_dir (char *dirname)
           char *pkgname = g_malloc (len - EXT_LEN + 1);
 
           debug_spew ("File '%s' appears to be a .pc file\n", d_name);
-          
+
           strncpy (pkgname, d_name, len - EXT_LEN);
           pkgname[len-EXT_LEN] = '\0';
 
@@ -196,7 +197,7 @@ scan_dir (char *dirname)
               strncpy (filename, dirname, dirnamelen);
               filename[dirnamelen] = G_DIR_SEPARATOR;
               strcpy (filename + dirnamelen + 1, d_name);
-              
+
 	      if (g_file_test(filename, G_FILE_TEST_IS_REGULAR) == TRUE) {
 		  g_hash_table_insert (locations, pkgname, filename);
 		  g_hash_table_insert (path_positions, pkgname,
@@ -252,11 +253,11 @@ package_init ()
   if (!initted)
     {
       initted = TRUE;
-      
+
       packages = g_hash_table_new (g_str_hash, g_str_equal);
       locations = g_hash_table_new (g_str_hash, g_str_equal);
       path_positions = g_hash_table_new (g_str_hash, g_str_equal);
-      
+
       add_virtual_pkgconfig_package ();
 
       g_list_foreach (search_dirs, (GFunc)scan_dir, NULL);
@@ -270,14 +271,14 @@ internal_get_package (const char *name, gboolean warn)
   char *key;
   const char *location;
   GList *iter;
-  
+
   pkg = g_hash_table_lookup (packages, name);
 
   if (pkg)
     return pkg;
 
   debug_spew ("Looking for package '%s'\n", name);
-  
+
   /* treat "name" as a filename if it ends in .pc and exists */
   if ( ends_in_dotpc (name) )
     {
@@ -297,17 +298,17 @@ internal_get_package (const char *name, gboolean warn)
           pkg = internal_get_package (un, FALSE);
 
           g_free (un);
-          
+
           if (pkg)
             {
               debug_spew ("Preferring uninstalled version of package '%s'\n", name);
               return pkg;
             }
         }
-      
+
       location = g_hash_table_lookup (locations, name);
     }
-  
+
   if (location == NULL)
     {
       if (warn)
@@ -355,7 +356,7 @@ internal_get_package (const char *name, gboolean warn)
 
   debug_spew ("Path position of '%s' is %d\n",
               pkg->key, pkg->path_position);
-  
+
   debug_spew ("Adding '%s' to list of known packages\n", pkg->key);
   g_hash_table_insert (packages, pkg->key, pkg);
 
@@ -464,7 +465,7 @@ flag_list_to_string (GList *list)
   GList *tmp;
   GString *str = g_string_new ("");
   char *retval;
-  
+
   tmp = list;
   while (tmp != NULL) {
     Flag *flag = tmp->data;
@@ -493,7 +494,7 @@ pathposcmp (gconstpointer a, gconstpointer b)
 {
   const Package *pa = a;
   const Package *pb = b;
-  
+
   if (pa->path_position < pb->path_position)
     return -1;
   else if (pa->path_position > pb->path_position)
@@ -685,7 +686,7 @@ verify_package (Package *pkg)
   GList *conflicts = NULL;
   GList *system_directories = NULL;
   GList *iter;
-  GList *requires_iter;
+  GList *requires_iter = NULL;
   GList *conflicts_iter;
   GList *system_dir_iter = NULL;
   int count;
@@ -699,7 +700,7 @@ verify_package (Package *pkg)
                "Internal pkg-config error, package with no key, please file a bug report\n");
       exit (1);
     }
-  
+
   if (pkg->name == NULL)
     {
       verbose_error ("Package '%s' has no Name: field\n",
@@ -720,7 +721,7 @@ verify_package (Package *pkg)
                      pkg->key);
       exit (1);
     }
-  
+
   /* Make sure we have the right version for all requirements */
 
   iter = pkg->requires_private;
@@ -751,21 +752,24 @@ verify_package (Package *pkg)
               exit (1);
             }
         }
-                                   
+
       iter = g_list_next (iter);
     }
 
   /* Make sure we didn't drag in any conflicts via Requires
    * (inefficient algorithm, who cares)
    */
-  recursive_fill_list (pkg, TRUE, &requires);
-  conflicts = pkg->conflicts;
+  if (!ignore_conflicts)
+    {
+      recursive_fill_list (pkg, TRUE, &requires);
+      conflicts = pkg->conflicts;
+      requires_iter = requires;
+    }
 
-  requires_iter = requires;
   while (requires_iter != NULL)
     {
       Package *req = requires_iter->data;
-      
+
       conflicts_iter = conflicts;
 
       while (conflicts_iter != NULL)
@@ -791,10 +795,10 @@ verify_package (Package *pkg)
 
           conflicts_iter = g_list_next (conflicts_iter);
         }
-      
+
       requires_iter = g_list_next (requires_iter);
     }
-  
+
   g_list_free (requires);
 
   /* We make a list of system directories that gcc expects so we can remove
@@ -1013,9 +1017,9 @@ define_global_variable (const char *varname,
       verbose_error ("Variable '%s' defined twice globally\n", varname);
       exit (1);
     }
-  
+
   g_hash_table_insert (globals, g_strdup (varname), g_strdup (varval));
-      
+
   debug_spew ("Global variable definition '%s' = '%s'\n",
               varname, varval);
 }
@@ -1077,9 +1081,9 @@ packages_get_var (GList     *pkgs,
   GString *str;
   char *retval;
   GError *error = NULL;
-  
+
   str = g_string_new ("");
-  
+
   tmp = pkgs;
   while (tmp != NULL)
     {
@@ -1158,7 +1162,7 @@ version_test (ComparisonType comparison,
     case ALWAYS_MATCH:
       return TRUE;
       break;
-      
+
     default:
       g_assert_not_reached ();
       break;
@@ -1199,7 +1203,7 @@ comparison_to_str (ComparisonType comparison)
     case ALWAYS_MATCH:
       return "(any)";
       break;
-      
+
     default:
       g_assert_not_reached ();
       break;
@@ -1226,7 +1230,7 @@ packages_foreach (gpointer key, gpointer value, gpointer data)
       char *pad;
 
       pad = g_strnfill (GPOINTER_TO_INT (data) - strlen (pkg->key), ' ');
-      
+
       printf ("%s%s%s - %s\n",
               pkg->key, pad, pkg->name, pkg->description);
 
@@ -1280,4 +1284,10 @@ void
 disable_requires_private(void)
 {
   ignore_requires_private = TRUE;
+}
+
+void
+disable_conflicts_check(void)
+{
+  ignore_conflicts = TRUE;
 }

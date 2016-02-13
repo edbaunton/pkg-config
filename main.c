@@ -61,6 +61,7 @@ static gboolean want_debug_spew = FALSE;
 static gboolean want_verbose_errors = FALSE;
 static gboolean want_stdout_errors = FALSE;
 static gboolean output_opt_set = FALSE;
+static gboolean want_no_conflicts_checks = FALSE;
 
 void
 debug_spew (const char *format, ...)
@@ -95,7 +96,7 @@ verbose_error (const char *format, ...)
   va_list args;
   gchar *str;
   FILE* stream;
-  
+
   g_return_if_fail (format != NULL);
 
   if (!want_verbose_errors)
@@ -109,7 +110,7 @@ verbose_error (const char *format, ...)
     stream = stdout;
   else
     stream = stderr;
-  
+
   fputs (str, stream);
   fflush (stream);
 
@@ -475,6 +476,9 @@ static const GOptionEntry options_table[] = {
   { "prefix-variable", 0, 0, G_OPTION_ARG_STRING, &prefix_variable,
     "set the name of the variable that pkg-config automatically sets",
     "PREFIX" },
+  { "ignore-conflicts", 0, 0, G_OPTION_ARG_NONE, &want_no_conflicts_checks,
+    "skip potentially expensive conflict checking from 'conflicts' "
+    "specifications", NULL },
 #ifdef G_OS_WIN32
   { "msvc-syntax", 0, 0, G_OPTION_ARG_NONE, &msvc_syntax,
     "output -l and -L flags for the Microsoft compiler (cl)", NULL },
@@ -518,11 +522,11 @@ main (int argc, char **argv)
     }
 
   search_path = getenv ("PKG_CONFIG_PATH");
-  if (search_path) 
+  if (search_path)
     {
       add_search_dirs(search_path, G_SEARCHPATH_SEPARATOR_S);
     }
-  if (getenv("PKG_CONFIG_LIBDIR") != NULL) 
+  if (getenv("PKG_CONFIG_LIBDIR") != NULL)
     {
       add_search_dirs(getenv("PKG_CONFIG_LIBDIR"), G_SEARCHPATH_SEPARATOR_S);
     }
@@ -629,6 +633,8 @@ main (int argc, char **argv)
   if (want_list)
     parse_strict = FALSE;
 
+  if (want_no_conflicts_checks)
+    disable_conflicts_check();
   if (want_my_version)
     {
       printf ("%s\n", VERSION);
@@ -811,7 +817,7 @@ main (int argc, char **argv)
             }
         }
     }
-  
+
   /* Print all flags; then print a newline at the end. */
   need_newline = FALSE;
 
